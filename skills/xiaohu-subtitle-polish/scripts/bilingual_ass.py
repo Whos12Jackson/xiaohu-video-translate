@@ -103,6 +103,41 @@ def pick_sizes(height, cn_override=None, ratio=1.7):
     return SIZE_TABLE[key]
 
 
+# 按文字脚本自动选字体（macOS）：默认苹方只覆盖中文 + 拉丁，
+# 韩语 / 阿拉伯语 / 日语假名各需对应系统字体，否则烧出来是方块。
+def _detect_script(text):
+    """返回 hangul / arabic / kana / cjk / latin 之一（按优先级）"""
+    has = {"hangul": False, "arabic": False, "kana": False, "cjk": False}
+    for ch in text:
+        o = ord(ch)
+        if 0xAC00 <= o <= 0xD7A3:
+            has["hangul"] = True
+        elif 0x0600 <= o <= 0x06FF or 0x0750 <= o <= 0x077F:
+            has["arabic"] = True
+        elif 0x3040 <= o <= 0x30FF:
+            has["kana"] = True
+        elif 0x4E00 <= o <= 0x9FFF:
+            has["cjk"] = True
+    for k in ("hangul", "arabic", "kana", "cjk"):
+        if has[k]:
+            return k
+    return "latin"
+
+
+# 脚本 → macOS 字体（这些字体都自带拉丁字形，英文行同字体即可）
+SCRIPT_FONT = {
+    "hangul": "Apple SD Gothic Neo",
+    "arabic": "Geeza Pro",
+    "kana": "Hiragino Sans",
+}
+
+
+def pick_font_for_items(items, default="PingFang SC"):
+    """扫描全部字幕文本，按主导文字脚本自动选字体；中文 / 拉丁回落默认苹方。"""
+    text = "".join("".join(lines) for _, _, lines in items)
+    return SCRIPT_FONT.get(_detect_script(text), default)
+
+
 def main():
     ap = argparse.ArgumentParser(description="双语 SRT → 双语 ASS（中文大 / 英文小）")
     ap.add_argument("srt", help="双语 SRT 路径（中文在上、英文在下）")
@@ -110,7 +145,7 @@ def main():
     ap.add_argument("--cn-size", type=int, default=None, help="中文字号（用户指定则覆盖默认表）")
     ap.add_argument("--en-size", type=int, default=None, help="英文字号（默认按中文 / 1.7 算）")
     ap.add_argument("--height", type=int, default=None, help="视频高度像素，用于选默认字号档")
-    ap.add_argument("--font", default="PingFang SC", help="字体名（默认 PingFang SC）")
+    ap.add_argument("--font", default=None, help="字体名（默认按文字脚本自动选：中文苹方 / 韩文 Apple SD Gothic / 阿拉伯 Geeza Pro / 日文 Hiragino）")
     ap.add_argument("--marginv", type=int, default=16, help="底部边距（默认 16）")
     args = ap.parse_args()
 
@@ -128,10 +163,12 @@ def main():
     if args.en_size:
         en_size = args.en_size
 
-    ass = build_ass(items, cn_size, en_size, font=args.font, marginv=args.marginv)
+    font = args.font or pick_font_for_items(items)
+
+    ass = build_ass(items, cn_size, en_size, font=font, marginv=args.marginv)
     out_path = args.output or str(srt_path.with_suffix(".ass"))
     Path(out_path).write_text(ass, encoding="utf-8")
-    print(f"完成！{len(items)} 条 → {out_path}（中文 {cn_size} / 英文 {en_size}）", file=sys.stderr)
+    print(f"完成！{len(items)} 条 → {out_path}（中文 {cn_size} / 英文 {en_size} / 字体 {font}）", file=sys.stderr)
 
 
 if __name__ == "__main__":
