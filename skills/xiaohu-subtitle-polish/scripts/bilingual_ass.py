@@ -73,16 +73,38 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
+def _is_cn_line(line):
+    """判断一行是否为中文译文行：含汉字、且不含假名 / 谚文。
+
+    中文行允许夹杂拉丁词（如「谁在用Claude Code」）；日文行靠假名、
+    韩文行靠谚文排除，避免日韩原文被误并入中文。
+    """
+    has_han = False
+    for ch in line:
+        o = ord(ch)
+        if 0x3040 <= o <= 0x30FF or 0xAC00 <= o <= 0xD7A3:
+            return False
+        if 0x4E00 <= o <= 0x9FFF:
+            has_han = True
+    return has_han
+
+
 def build_ass(items, cn_size, en_size, font="PingFang SC", marginv=16):
     out = [ASS_HEADER.format(font=font, cn_size=cn_size, marginv=marginv)]
     for start, end, lines in items:
-        if len(lines) >= 2:
-            cn = lines[0].strip()
-            en = " ".join(x.strip() for x in lines[1:])
+        # 中文译文可能折行成多行，不能假设「第 1 行中文、其余英文」：
+        # 第 1 行固定视为中文，向后吸收连续的中文行，剩余的才是原文。
+        cn_parts = [lines[0].strip()]
+        rest = [x.strip() for x in lines[1:]]
+        while rest and _is_cn_line(rest[0]):
+            cn_parts.append(rest.pop(0))
+        cn = " ".join(cn_parts)
+        en = " ".join(rest)
+        if en:
             text = f"{cn}\\N{{\\fs{en_size}}}{en}"
         else:
-            # 只有一行（纯中文条）：直接用默认字号
-            text = lines[0].strip()
+            # 没有原文行（纯中文条）：直接用默认字号
+            text = cn
         out.append(
             f"Dialogue: 0,{srt_time_to_ass(start)},{srt_time_to_ass(end)},Default,,0,0,0,,{text}"
         )
